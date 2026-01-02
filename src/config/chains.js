@@ -30,7 +30,7 @@ export const SUPPORTED_CHAINS = {
     name: 'BNB Chain',
     symbol: 'BNB',
     chain: bsc,
-    rpcUrl: "https://bsc-dataseed.binance.org/",
+    rpcUrl: "https://bsc.api.pocket.network/",
     alchemyUrl: 'https://bnb-mainnet.g.alchemy.com/v2/SvIcMuv58RZnjEr4p5bXrN2_fnMa0rWc',
     explorer: 'https://bscscan.com',
     icon: 'https://cryptologos.cc/logos/bnb-bnb-logo.png?v=024',
@@ -93,6 +93,16 @@ export const SUPPORTED_CHAINS = {
     testnet: true,
     factoryAddress: getFactoryAddress(84532),
   },
+  //  ABSTRACT: {
+  //     id: 2741,
+  //     name: 'Abstract',
+  //     symbol: 'ETH',
+  //     rpcUrl: 'https://abstract.drpc.org', // replace if needed
+  //     explorer: 'https://explorer.abstract.xyz',
+  //     icon: abstract,
+  //     testnet: false,
+  //       factoryAddress: getFactoryAddress(84532),
+  //   },
 };
 
 export const DEFAULT_CHAIN = SUPPORTED_CHAINS.BASE_SEPOLIA;

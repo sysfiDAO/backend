@@ -7,34 +7,50 @@ export const FACTORY_ADDRESSES = {
     chainId: 1,
     address: null, // Not deployed yet
   },
+
   POLYGON: {
     chainId: 137,
-    address: null, // Not deployed yet
+    address: "0x3c181eaaB64052c726194Da6797EA06DD15e8E6B",
   },
+
   BSC: {
     chainId: 56,
-    address: null, // Not deployed yet
+    address: '0x3c181eaaB64052c726194Da6797EA06DD15e8E6B', // Not deployed yet
   },
+
   ARBITRUM: {
     chainId: 42161,
-    address: null, // Not deployed yet
+    address: '0x3c181eaaB64052c726194Da6797EA06DD15e8E6B',
   },
-  OPTIMISM: {
-    chainId: 10,
-    address: null, // Not deployed yet
-  },
+
+  // OPTIMISM: {
+  //   chainId: 10,
+  //   address: null, // Not deployed yet
+  // },
+
   AVALANCHE: {
     chainId: 43114,
-    address: null, // Not deployed yet
+    address: '0x3c181eaaB64052c726194Da6797EA06DD15e8E6B',
   },
+
   BASE: {
     chainId: 8453,
     address: '0x616f59CCc6951958C6177574AEDCe4A83caF8360',
   },
+
   BASE_SEPOLIA: {
     chainId: 84532,
     address: '0x4B3AD106552927494E0DB019170c1E5d4E5D08Eb',
   },
+
+
+
+  // ABSTRACT: {
+  //   chainId: 2741,
+  //   address: null, // Deploy factory here
+  // },
+
+
 };
 
 /**
