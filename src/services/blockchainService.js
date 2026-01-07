@@ -1,6 +1,7 @@
+// services/blockchainService.js
 import { createPublicClient, http } from 'viem';
 import { SUPPORTED_CHAINS } from '../config/chains.js';
-import { DAO_FACTORY_ABI, GENRE_MAP, PAYMENT_METHOD_MAP } from '../config/contracts.js';
+import { DAO_FACTORY_ABI, GENRE_MAP } from '../config/contracts.js';
 import cacheService from './cacheService.js';
 import logger from '../utils/logger.js';
 
@@ -73,10 +74,6 @@ class BlockchainService {
    * Get total DAOs count for a specific chain
    */
   async getTotalDAOs(chainId) {
-    const cacheKey = `total_daos_${chainId}`;
-    const cached = cacheService.get(cacheKey);
-    if (cached !== null) return cached;
-
     try {
       const client = this.clients[chainId];
       const chainConfig = this.getChainConfig(chainId);
@@ -91,9 +88,7 @@ class BlockchainService {
         functionName: 'getTotalDAOs',
       });
 
-      const totalNumber = Number(total);
-      cacheService.set(cacheKey, totalNumber, 60); // Cache for 1 minute
-      return totalNumber;
+      return Number(total);
     } catch (error) {
       logger.error(`Error getting total DAOs for chain ${chainId}:`, error);
       throw error;
@@ -104,20 +99,31 @@ class BlockchainService {
    * Fetch DAOs from a specific chain with pagination
    */
   async fetchDAOsFromChain(chainId, offset = 0, limit = 100) {
-    const cacheKey = `daos_${chainId}_${offset}_${limit}`;
-    const cached = cacheService.get(cacheKey);
-    if (cached !== null) return cached;
-
     try {
-      const client = this.clients[chainId];
       const chainConfig = this.getChainConfig(chainId);
 
-      if (!client || !chainConfig?.factoryAddress) {
+      if (!chainConfig) {
         logger.warn(`Chain ${chainId} not configured, skipping...`);
         return [];
       }
 
-      logger.chain(chainConfig.name, `Fetching DAOs (offset: ${offset}, limit: ${limit})`);
+      // ✅ Check if we have recent data in PostgreSQL
+      const isStale = await cacheService.isSyncStale(chainId, 300); // 5 minutes
+      
+      if (!isStale) {
+        logger.info(`Using cached data for ${chainConfig.name}`);
+        return await cacheService.getDAOsByChain(chainId, offset, limit);
+      }
+
+      // ✅ Fetch fresh data from blockchain
+      const client = this.clients[chainId];
+      
+      if (!client || !chainConfig.factoryAddress) {
+        logger.warn(`Chain ${chainId} not properly configured`);
+        return await cacheService.getDAOsByChain(chainId, offset, limit);
+      }
+
+      logger.chain(chainConfig.name, `Fetching DAOs from blockchain (offset: ${offset}, limit: ${limit})`);
 
       const daos = await client.readContract({
         address: chainConfig.factoryAddress,
@@ -128,87 +134,92 @@ class BlockchainService {
 
       const formattedDAOs = daos.map(dao => this.formatDAOData(dao, chainId));
       
-      cacheService.set(cacheKey, formattedDAOs);
-      logger.success(`Fetched ${formattedDAOs.length} DAOs from ${chainConfig.name}`);
+      // ✅ Save to PostgreSQL
+      if (formattedDAOs.length > 0) {
+        await cacheService.batchSaveDAOs(formattedDAOs);
+      }
+      
+      // ✅ Update sync metadata
+      const total = await this.getTotalDAOs(chainId);
+      await cacheService.updateSyncMetadata(chainId, chainConfig.name, total, 'synced');
+      
+      logger.success(`Fetched and saved ${formattedDAOs.length} DAOs from ${chainConfig.name}`);
       
       return formattedDAOs;
     } catch (error) {
       logger.error(`Error fetching DAOs from chain ${chainId}:`, error);
-      return [];
+      
+      // ✅ Fallback to database on error
+      return await cacheService.getDAOsByChain(chainId, offset, limit);
     }
   }
 
   /**
    * Fetch all DAOs from all chains
    */
- /**
- * Fetch all DAOs from all chains
- */
-async fetchAllDAOs() {
-  const cacheKey = 'all_daos';
-  const cached = cacheService.get(cacheKey);
-  if (cached !== null) {
-    logger.info('Returning cached all DAOs');
-    return cached;
-  }
+  async fetchAllDAOs() {
+    logger.info('Fetching DAOs from all chains...');
+    const allDAOs = [];
 
-  logger.info('Fetching DAOs from all chains...');
-  const allDAOs = [];
+    for (const [key, chainConfig] of Object.entries(SUPPORTED_CHAINS)) {
+      if (!this.clients[chainConfig.id]) continue;
 
-  for (const [key, chainConfig] of Object.entries(SUPPORTED_CHAINS)) {
-    if (!this.clients[chainConfig.id]) continue;
+      try {
+        const total = await this.getTotalDAOs(chainConfig.id);
+        logger.info(`Total DAOs on ${chainConfig.name}: ${total}`);
 
-    try {
-      const total = await this.getTotalDAOs(chainConfig.id);
-      logger.info(`Total DAOs on ${chainConfig.name}: ${total}`);
+        if (total === 0) continue;
 
-      if (total === 0) continue;
+        // Fetch in batches of 100
+        let offset = 0;
+        const limit = 100;
 
-      // Fetch in batches of 100
-      let offset = 0;
-      const limit = 100;
-
-      while (offset < total) {  // ✅ Check against total
-        const daos = await this.fetchDAOsFromChain(chainConfig.id, offset, limit);
-        
-        // ✅ Only add if we got results
-        if (daos.length > 0) {
-          allDAOs.push(...daos);
+        while (offset < total) {
+          const daos = await this.fetchDAOsFromChain(chainConfig.id, offset, limit);
+          
+          if (daos.length > 0) {
+            allDAOs.push(...daos);
+          }
+          
+          offset += limit;
+          
+          // Break if we got less than limit (reached the end)
+          if (daos.length < limit) {
+            logger.info(`Reached end of DAOs for ${chainConfig.name}`);
+            break;
+          }
         }
-        
-        offset += limit;
-        
-        // ✅ Break if we got less than limit (reached the end)
-        if (daos.length < limit) {
-          logger.info(`Reached end of DAOs for ${chainConfig.name}`);
-          break;
-        }
+      } catch (error) {
+        logger.error(`Error fetching from ${chainConfig.name}:`, error);
       }
-    } catch (error) {
-      logger.error(`Error fetching from ${chainConfig.name}:`, error);
     }
-  }
 
-  logger.success(`Total DAOs fetched: ${allDAOs.length}`);
-  cacheService.set(cacheKey, allDAOs);
-  return allDAOs;
-}
+    logger.success(`Total DAOs fetched: ${allDAOs.length}`);
+    return allDAOs;
+  }
 
   /**
    * Get DAO by address and chain
    */
   async getDAOByAddress(chainId, daoAddress) {
-    const cacheKey = `dao_${chainId}_${daoAddress}`;
-    const cached = cacheService.get(cacheKey);
-    if (cached !== null) return cached;
-
     try {
+      // ✅ Check database first
+      const cachedDAO = await cacheService.getDAOByAddress(chainId, daoAddress);
+      
+      if (cachedDAO) {
+        logger.debug(`DAO ${daoAddress} found in database`);
+        return cachedDAO;
+      }
+
+      // ✅ Fetch from blockchain if not in database
       const client = this.clients[chainId];
       const chainConfig = this.getChainConfig(chainId);
 
       if (!client || !chainConfig?.factoryAddress) {
         throw new Error(`Chain ${chainId} not configured`);
       }
+
+      logger.info(`Fetching DAO ${daoAddress} from blockchain...`);
 
       const dao = await client.readContract({
         address: chainConfig.factoryAddress,
@@ -218,7 +229,9 @@ async fetchAllDAOs() {
       });
 
       const formattedDAO = this.formatDAOData(dao, chainId);
-      cacheService.set(cacheKey, formattedDAO);
+      
+      // ✅ Save to database
+      await cacheService.saveDAO(formattedDAO);
       
       return formattedDAO;
     } catch (error) {
@@ -231,17 +244,24 @@ async fetchAllDAOs() {
    * Get DAOs by genre from a specific chain
    */
   async getDAOsByGenre(chainId, genreId, offset = 0, limit = 100) {
-    const cacheKey = `daos_genre_${chainId}_${genreId}_${offset}_${limit}`;
-    const cached = cacheService.get(cacheKey);
-    if (cached !== null) return cached;
-
     try {
+      // ✅ Try database first
+      const cachedDAOs = await cacheService.getDAOsByGenre(chainId, genreId, offset, limit);
+      
+      if (cachedDAOs.length > 0) {
+        logger.debug(`Found ${cachedDAOs.length} DAOs for genre ${genreId} in database`);
+        return cachedDAOs;
+      }
+
+      // ✅ Fetch from blockchain if not in database
       const client = this.clients[chainId];
       const chainConfig = this.getChainConfig(chainId);
 
       if (!client || !chainConfig?.factoryAddress) {
         throw new Error(`Chain ${chainId} not configured`);
       }
+
+      logger.info(`Fetching genre ${genreId} DAOs from blockchain...`);
 
       const daos = await client.readContract({
         address: chainConfig.factoryAddress,
@@ -251,7 +271,11 @@ async fetchAllDAOs() {
       });
 
       const formattedDAOs = daos.map(dao => this.formatDAOData(dao, chainId));
-      cacheService.set(cacheKey, formattedDAOs);
+      
+      // ✅ Save to database
+      if (formattedDAOs.length > 0) {
+        await cacheService.batchSaveDAOs(formattedDAOs);
+      }
       
       return formattedDAOs;
     } catch (error) {
@@ -314,14 +338,14 @@ async fetchAllDAOs() {
         `New DAO created: ${args.daoName} at ${args.daoAddress}`
       );
 
-      // Invalidate caches
-      cacheService.delete('all_daos');
-      cacheService.delete(`total_daos_${chainId}`);
-      
-      // Fetch and cache the new DAO details
+      // ✅ Fetch and save the new DAO to database
       await this.getDAOByAddress(chainId, args.daoAddress);
+      
+      // ✅ Update sync metadata
+      const total = await this.getTotalDAOs(chainId);
+      await cacheService.updateSyncMetadata(chainId, chainConfig.name, total, 'synced');
 
-      logger.success(`DAO ${args.daoName} cached successfully`);
+      logger.success(`DAO ${args.daoName} saved to database`);
     } catch (error) {
       logger.error('Error handling DAOCreated event:', error);
     }

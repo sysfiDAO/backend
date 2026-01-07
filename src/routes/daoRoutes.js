@@ -1,3 +1,4 @@
+// routes/daoRoutes.js
 import express from 'express';
 import blockchainService from '../services/blockchainService.js';
 import cacheService from '../services/cacheService.js';
@@ -26,6 +27,57 @@ router.get('/daos', async (req, res) => {
       success: false,
       error: 'Failed to fetch DAOs',
       message: error.message,
+    });
+  }
+});
+
+/**
+ * GET /api/daos/sync
+ * ✅ NEW: Incremental sync - only returns DAOs created/updated after lastSyncTimestamp
+ */
+router.get('/daos/sync', async (req, res) => {
+  try {
+    const { chainId, lastSyncTimestamp, limit = 100 } = req.query;
+
+    logger.info(`GET /api/daos/sync - chainId: ${chainId}, lastSyncTimestamp: ${lastSyncTimestamp}`);
+
+    if (!chainId) {
+      return res.status(400).json({ 
+        success: false, 
+        error: 'chainId is required' 
+      });
+    }
+
+    // Get DAOs updated after lastSyncTimestamp
+    const newDAOs = await cacheService.getDAOsSinceTimestamp(
+      parseInt(chainId),
+      parseInt(lastSyncTimestamp) || 0,
+      parseInt(limit)
+    );
+
+    // Get current total count
+    const totalDAOs = await cacheService.getTotalDAOsCount(parseInt(chainId));
+
+    // Get sync metadata
+    const syncMetadata = await cacheService.getSyncMetadata(parseInt(chainId));
+
+    logger.info(`Sync result: ${newDAOs.length} new DAOs found`);
+
+    res.json({
+      success: true,
+      data: {
+        daos: newDAOs,
+        hasMore: newDAOs.length === parseInt(limit),
+        totalDAOs,
+        syncTimestamp: Date.now(),
+        lastBackendSync: syncMetadata?.last_sync_at || null,
+      },
+    });
+  } catch (error) {
+    logger.error('Error in GET /api/daos/sync:', error);
+    res.status(500).json({ 
+      success: false, 
+      error: error.message 
     });
   }
 });
@@ -160,27 +212,7 @@ router.get('/stats', async (req, res) => {
   try {
     logger.info('GET /api/stats - Fetching statistics');
     
-    const stats = {
-      totalDAOs: 0,
-      chainStats: [],
-      cacheStats: cacheService.getStats(),
-    };
-
-    for (const [key, chainConfig] of Object.entries(SUPPORTED_CHAINS)) {
-      if (!blockchainService.clients[chainConfig.id]) continue;
-
-      try {
-        const total = await blockchainService.getTotalDAOs(chainConfig.id);
-        stats.totalDAOs += total;
-        stats.chainStats.push({
-          chainId: chainConfig.id,
-          chainName: chainConfig.name,
-          totalDAOs: total,
-        });
-      } catch (error) {
-        logger.error(`Error getting stats for ${chainConfig.name}:`, error);
-      }
-    }
+    const stats = await cacheService.getStats();
 
     res.json({
       success: true,
@@ -200,10 +232,20 @@ router.get('/stats', async (req, res) => {
  * POST /api/cache/clear
  * Clear cache (useful for debugging)
  */
-router.post('/cache/clear', (req, res) => {
+router.post('/cache/clear', async (req, res) => {
   try {
-    logger.info('POST /api/cache/clear - Clearing cache');
-    cacheService.flush();
+    const { chainId } = req.body;
+    
+    logger.info(`POST /api/cache/clear - chainId: ${chainId || 'all'}`);
+    
+    if (chainId) {
+      await cacheService.deleteDAOsByChain(parseInt(chainId));
+    } else {
+      // Clear all chains
+      for (const chain of Object.values(SUPPORTED_CHAINS)) {
+        await cacheService.deleteDAOsByChain(chain.id);
+      }
+    }
     
     res.json({
       success: true,

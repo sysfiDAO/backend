@@ -1,111 +1,344 @@
-import NodeCache from 'node-cache';
+// services/cacheService.js
+import db from '../config/db.js';
 import logger from '../utils/logger.js';
 
 class CacheService {
   constructor() {
-    // Initialize cache with TTL from env or default to 5 minutes
-    this.cache = new NodeCache({
-      stdTTL: parseInt(process.env.CACHE_TTL) || 300,
-      checkperiod: parseInt(process.env.CACHE_CHECK_PERIOD) || 60,
-      useClones: false,
-    });
-
-    this.cache.on('set', (key, value) => {
-      logger.debug(`Cache SET: ${key}`);
-    });
-
-    this.cache.on('del', (key) => {
-      logger.debug(`Cache DEL: ${key}`);
-    });
-
-    this.cache.on('expired', (key, value) => {
-      logger.debug(`Cache EXPIRED: ${key}`);
-    });
+    this.defaultTTL = parseInt(process.env.CACHE_TTL) || 300; // 5 minutes
   }
 
   /**
-   * Get value from cache
+   * Save or update DAO in database
    */
-  get(key) {
+  async saveDAO(daoData) {
     try {
-      const value = this.cache.get(key);
-      if (value !== undefined) {
-        logger.debug(`Cache HIT: ${key}`);
-        return value;
+      const query = `
+        INSERT INTO daos (
+          dao_address, token_address, chain_id, chain_name, genre, genre_id,
+          dao_name, image_url, threshold, quorum, voting_period_hours,
+          timelock_period_hours, created_at, created_at_date, explorer, explorer_url,
+          cached_at, updated_at
+        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, NOW(), NOW())
+        ON CONFLICT (dao_address, chain_id) 
+        DO UPDATE SET
+          token_address = EXCLUDED.token_address,
+          genre = EXCLUDED.genre,
+          genre_id = EXCLUDED.genre_id,
+          dao_name = EXCLUDED.dao_name,
+          image_url = EXCLUDED.image_url,
+          threshold = EXCLUDED.threshold,
+          quorum = EXCLUDED.quorum,
+          voting_period_hours = EXCLUDED.voting_period_hours,
+          timelock_period_hours = EXCLUDED.timelock_period_hours,
+          explorer = EXCLUDED.explorer,
+          explorer_url = EXCLUDED.explorer_url,
+          updated_at = NOW()
+        RETURNING *
+      `;
+
+      const values = [
+        daoData.daoAddress,
+        daoData.tokenAddress,
+        daoData.chainId,
+        daoData.chainName,
+        daoData.genre,
+        daoData.genreId,
+        daoData.daoName,
+        daoData.imageUrl,
+        daoData.threshold,
+        daoData.quorum,
+        daoData.votingPeriodHours,
+        daoData.timelockPeriodHours,
+        daoData.createdAt,
+        daoData.createdAtDate,
+        daoData.explorer,
+        daoData.explorerUrl,
+      ];
+
+      const result = await db.query(query, values);
+      logger.debug(`DAO saved: ${daoData.daoName}`);
+      return result.rows[0];
+    } catch (error) {
+      logger.error('Error saving DAO:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Batch save DAOs
+   */
+  async batchSaveDAOs(daos) {
+    const client = await db.getClient();
+    
+    try {
+      await client.query('BEGIN');
+      
+      for (const dao of daos) {
+        await this.saveDAO(dao);
       }
-      logger.debug(`Cache MISS: ${key}`);
-      return null;
+      
+      await client.query('COMMIT');
+      logger.success(`Batch saved ${daos.length} DAOs`);
+      return true;
     } catch (error) {
-      logger.error(`Cache GET error for key ${key}:`, error);
-      return null;
+      await client.query('ROLLBACK');
+      logger.error('Error batch saving DAOs:', error);
+      throw error;
+    } finally {
+      client.release();
     }
   }
 
   /**
-   * Set value in cache
+   * Get all DAOs for a chain with pagination
    */
-  set(key, value, ttl = null) {
+  async getDAOsByChain(chainId, offset = 0, limit = 100) {
     try {
-      if (ttl) {
-        this.cache.set(key, value, ttl);
-      } else {
-        this.cache.set(key, value);
+      const query = `
+        SELECT * FROM daos 
+        WHERE chain_id = $1 
+        ORDER BY created_at DESC 
+        LIMIT $2 OFFSET $3
+      `;
+      
+      const result = await db.query(query, [chainId, limit, offset]);
+      logger.debug(`Retrieved ${result.rows.length} DAOs for chain ${chainId}`);
+      return result.rows;
+    } catch (error) {
+      logger.error(`Error getting DAOs for chain ${chainId}:`, error);
+      return [];
+    }
+  }
+
+  /**
+   * Get total DAOs count for a chain
+   */
+  async getTotalDAOsCount(chainId) {
+    try {
+      const query = 'SELECT COUNT(*) as count FROM daos WHERE chain_id = $1';
+      const result = await db.query(query, [chainId]);
+      return parseInt(result.rows[0].count);
+    } catch (error) {
+      logger.error(`Error getting total DAOs for chain ${chainId}:`, error);
+      return 0;
+    }
+  }
+
+  /**
+   * Get DAO by address and chain
+   */
+  async getDAOByAddress(chainId, daoAddress) {
+    try {
+      const query = `
+        SELECT * FROM daos 
+        WHERE chain_id = $1 AND dao_address = $2 
+        LIMIT 1
+      `;
+      
+      const result = await db.query(query, [chainId, daoAddress.toLowerCase()]);
+      
+      if (result.rows.length === 0) {
+        return null;
       }
-      logger.debug(`Cache SET: ${key}`);
-      return true;
+      
+      return result.rows[0];
     } catch (error) {
-      logger.error(`Cache SET error for key ${key}:`, error);
-      return false;
+      logger.error(`Error getting DAO ${daoAddress}:`, error);
+      return null;
     }
   }
 
   /**
-   * Delete value from cache
+   * Get DAOs by genre
    */
-  delete(key) {
+  async getDAOsByGenre(chainId, genreId, offset = 0, limit = 100) {
     try {
-      this.cache.del(key);
-      logger.debug(`Cache DELETE: ${key}`);
-      return true;
+      const query = `
+        SELECT * FROM daos 
+        WHERE chain_id = $1 AND genre_id = $2 
+        ORDER BY created_at DESC 
+        LIMIT $3 OFFSET $4
+      `;
+      
+      const result = await db.query(query, [chainId, genreId, limit, offset]);
+      return result.rows;
     } catch (error) {
-      logger.error(`Cache DELETE error for key ${key}:`, error);
-      return false;
+      logger.error(`Error getting DAOs by genre:`, error);
+      return [];
     }
   }
 
   /**
-   * Clear all cache
+   * Search DAOs by name
    */
-  flush() {
+  async searchDAOs(searchQuery, chainId = null, limit = 50) {
     try {
-      this.cache.flushAll();
-      logger.info('Cache flushed');
+      let query = `
+        SELECT * FROM daos 
+        WHERE dao_name ILIKE $1
+      `;
+      const params = [`%${searchQuery}%`];
+      
+      if (chainId) {
+        query += ' AND chain_id = $2';
+        params.push(chainId);
+      }
+      
+      query += ' ORDER BY created_at DESC LIMIT $' + (params.length + 1);
+      params.push(limit);
+      
+      const result = await db.query(query, params);
+      return result.rows;
+    } catch (error) {
+      logger.error('Error searching DAOs:', error);
+      return [];
+    }
+  }
+
+  /**
+   * Get all DAOs (with optional pagination)
+   */
+  async getAllDAOs(offset = 0, limit = 1000) {
+    try {
+      const query = `
+        SELECT * FROM daos 
+        ORDER BY created_at DESC 
+        LIMIT $1 OFFSET $2
+      `;
+      
+      const result = await db.query(query, [limit, offset]);
+      logger.debug(`Retrieved ${result.rows.length} total DAOs`);
+      return result.rows;
+    } catch (error) {
+      logger.error('Error getting all DAOs:', error);
+      return [];
+    }
+  }
+
+  /**
+   * Update sync metadata
+   */
+  async updateSyncMetadata(chainId, chainName, totalDAOs, status = 'synced', errorMessage = null) {
+    try {
+      const query = `
+        INSERT INTO sync_metadata (chain_id, chain_name, total_daos, sync_status, error_message, last_sync_at, updated_at)
+        VALUES ($1, $2, $3, $4, $5, NOW(), NOW())
+        ON CONFLICT (chain_id) 
+        DO UPDATE SET
+          total_daos = EXCLUDED.total_daos,
+          sync_status = EXCLUDED.sync_status,
+          error_message = EXCLUDED.error_message,
+          last_sync_at = NOW(),
+          updated_at = NOW()
+        RETURNING *
+      `;
+      
+      const result = await db.query(query, [chainId, chainName, totalDAOs, status, errorMessage]);
+      logger.debug(`Sync metadata updated for chain ${chainId}`);
+      return result.rows[0];
+    } catch (error) {
+      logger.error('Error updating sync metadata:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Get sync metadata
+   */
+  async getSyncMetadata(chainId) {
+    try {
+      const query = 'SELECT * FROM sync_metadata WHERE chain_id = $1';
+      const result = await db.query(query, [chainId]);
+      return result.rows[0] || null;
+    } catch (error) {
+      logger.error(`Error getting sync metadata for chain ${chainId}:`, error);
+      return null;
+    }
+  }
+
+  /**
+   * Check if sync is stale (older than TTL)
+   */
+  async isSyncStale(chainId, ttlSeconds = 300) {
+    try {
+      const metadata = await this.getSyncMetadata(chainId);
+      
+      if (!metadata) return true;
+      
+      const lastSync = new Date(metadata.last_sync_at);
+      const now = new Date();
+      const diffSeconds = (now - lastSync) / 1000;
+      
+      return diffSeconds > ttlSeconds;
+    } catch (error) {
+      logger.error('Error checking sync staleness:', error);
+      return true;
+    }
+  }
+
+  /**
+   * Delete DAOs for a chain (for testing/reset)
+   */
+  async deleteDAOsByChain(chainId) {
+    try {
+      await db.query('DELETE FROM daos WHERE chain_id = $1', [chainId]);
+      logger.info(`Deleted all DAOs for chain ${chainId}`);
       return true;
     } catch (error) {
-      logger.error('Cache FLUSH error:', error);
+      logger.error('Error deleting DAOs:', error);
       return false;
     }
   }
 
+/**
+ * Get DAOs created since a specific timestamp
+ */
+async getDAOsSinceTimestamp(chainId, sinceTimestamp, limit = 100) {
+  try {
+    // Convert milliseconds to seconds for comparison with created_at
+    const sinceTimestampSeconds = Math.floor(sinceTimestamp / 1000);
+    
+    const query = `
+      SELECT * FROM daos 
+      WHERE chain_id = $1 
+        AND created_at > $2
+      ORDER BY created_at DESC 
+      LIMIT $3
+    `;
+    
+    const result = await db.query(query, [chainId, sinceTimestampSeconds, limit]);
+    logger.debug(`Retrieved ${result.rows.length} new DAOs since timestamp ${sinceTimestamp}`); // ✅ Fixed: ( instead of `
+    return result.rows;
+  } catch (error) {
+    logger.error(`Error getting DAOs since timestamp:`, error); // ✅ Fixed: ( instead of `
+    return [];
+  }
+}
   /**
    * Get cache statistics
    */
-  getStats() {
-    return this.cache.getStats();
-  }
-
-  /**
-   * Get all keys
-   */
-  getKeys() {
-    return this.cache.keys();
-  }
-
-  /**
-   * Check if key exists
-   */
-  has(key) {
-    return this.cache.has(key);
+  async getStats() {
+    try {
+      const totalQuery = 'SELECT COUNT(*) as total FROM daos';
+      const chainsQuery = `
+        SELECT chain_id, chain_name, COUNT(*) as count 
+        FROM daos 
+        GROUP BY chain_id, chain_name
+      `;
+      
+      const [totalResult, chainsResult] = await Promise.all([
+        db.query(totalQuery),
+        db.query(chainsQuery),
+      ]);
+      
+      return {
+        totalDAOs: parseInt(totalResult.rows[0].total),
+        byChain: chainsResult.rows,
+      };
+    } catch (error) {
+      logger.error('Error getting stats:', error);
+      return { totalDAOs: 0, byChain: [] };
+    }
   }
 }
 
