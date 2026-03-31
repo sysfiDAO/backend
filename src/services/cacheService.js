@@ -59,7 +59,7 @@ class CacheService {
       logger.debug(`DAO saved: ${daoData.daoName}`);
       return result.rows[0];
     } catch (error) {
-      logger.error('Error saving DAO:', error);
+      logger.error("Error saving DAO:", error);
       throw error;
     }
   }
@@ -69,20 +69,20 @@ class CacheService {
    */
   async batchSaveDAOs(daos) {
     const client = await db.getClient();
-    
+
     try {
-      await client.query('BEGIN');
-      
+      await client.query("BEGIN");
+
       for (const dao of daos) {
         await this.saveDAO(dao);
       }
-      
-      await client.query('COMMIT');
+
+      await client.query("COMMIT");
       logger.success(`Batch saved ${daos.length} DAOs`);
       return true;
     } catch (error) {
-      await client.query('ROLLBACK');
-      logger.error('Error batch saving DAOs:', error);
+      await client.query("ROLLBACK");
+      logger.error("Error batch saving DAOs:", error);
       throw error;
     } finally {
       client.release();
@@ -100,7 +100,7 @@ class CacheService {
         ORDER BY created_at DESC 
         LIMIT $2 OFFSET $3
       `;
-      
+
       const result = await db.query(query, [chainId, limit, offset]);
       logger.debug(`Retrieved ${result.rows.length} DAOs for chain ${chainId}`);
       return result.rows;
@@ -115,7 +115,7 @@ class CacheService {
    */
   async getTotalDAOsCount(chainId) {
     try {
-      const query = 'SELECT COUNT(*) as count FROM daos WHERE chain_id = $1';
+      const query = "SELECT COUNT(*) as count FROM daos WHERE chain_id = $1";
       const result = await db.query(query, [chainId]);
       return parseInt(result.rows[0].count);
     } catch (error) {
@@ -134,13 +134,13 @@ class CacheService {
         WHERE chain_id = $1 AND dao_address = $2 
         LIMIT 1
       `;
-      
+
       const result = await db.query(query, [chainId, daoAddress.toLowerCase()]);
-      
+
       if (result.rows.length === 0) {
         return null;
       }
-      
+
       return result.rows[0];
     } catch (error) {
       logger.error(`Error getting DAO ${daoAddress}:`, error);
@@ -159,7 +159,7 @@ class CacheService {
         ORDER BY created_at DESC 
         LIMIT $3 OFFSET $4
       `;
-      
+
       const result = await db.query(query, [chainId, genreId, limit, offset]);
       return result.rows;
     } catch (error) {
@@ -178,19 +178,19 @@ class CacheService {
         WHERE dao_name ILIKE $1
       `;
       const params = [`%${searchQuery}%`];
-      
+
       if (chainId) {
-        query += ' AND chain_id = $2';
+        query += " AND chain_id = $2";
         params.push(chainId);
       }
-      
-      query += ' ORDER BY created_at DESC LIMIT $' + (params.length + 1);
+
+      query += " ORDER BY created_at DESC LIMIT $" + (params.length + 1);
       params.push(limit);
-      
+
       const result = await db.query(query, params);
       return result.rows;
     } catch (error) {
-      logger.error('Error searching DAOs:', error);
+      logger.error("Error searching DAOs:", error);
       return [];
     }
   }
@@ -205,12 +205,12 @@ class CacheService {
         ORDER BY created_at DESC 
         LIMIT $1 OFFSET $2
       `;
-      
+
       const result = await db.query(query, [limit, offset]);
       logger.debug(`Retrieved ${result.rows.length} total DAOs`);
       return result.rows;
     } catch (error) {
-      logger.error('Error getting all DAOs:', error);
+      logger.error("Error getting all DAOs:", error);
       return [];
     }
   }
@@ -218,7 +218,13 @@ class CacheService {
   /**
    * Update sync metadata
    */
-  async updateSyncMetadata(chainId, chainName, totalDAOs, status = 'synced', errorMessage = null) {
+  async updateSyncMetadata(
+    chainId,
+    chainName,
+    totalDAOs,
+    status = "synced",
+    errorMessage = null,
+  ) {
     try {
       const query = `
         INSERT INTO sync_metadata (chain_id, chain_name, total_daos, sync_status, error_message, last_sync_at, updated_at)
@@ -232,12 +238,18 @@ class CacheService {
           updated_at = NOW()
         RETURNING *
       `;
-      
-      const result = await db.query(query, [chainId, chainName, totalDAOs, status, errorMessage]);
+
+      const result = await db.query(query, [
+        chainId,
+        chainName,
+        totalDAOs,
+        status,
+        errorMessage,
+      ]);
       logger.debug(`Sync metadata updated for chain ${chainId}`);
       return result.rows[0];
     } catch (error) {
-      logger.error('Error updating sync metadata:', error);
+      logger.error("Error updating sync metadata:", error);
       throw error;
     }
   }
@@ -247,7 +259,7 @@ class CacheService {
    */
   async getSyncMetadata(chainId) {
     try {
-      const query = 'SELECT * FROM sync_metadata WHERE chain_id = $1';
+      const query = "SELECT * FROM sync_metadata WHERE chain_id = $1";
       const result = await db.query(query, [chainId]);
       return result.rows[0] || null;
     } catch (error) {
@@ -262,16 +274,16 @@ class CacheService {
   async isSyncStale(chainId, ttlSeconds = 300) {
     try {
       const metadata = await this.getSyncMetadata(chainId);
-      
+
       if (!metadata) return true;
-      
+
       const lastSync = new Date(metadata.last_sync_at);
       const now = new Date();
       const diffSeconds = (now - lastSync) / 1000;
-      
+
       return diffSeconds > ttlSeconds;
     } catch (error) {
-      logger.error('Error checking sync staleness:', error);
+      logger.error("Error checking sync staleness:", error);
       return true;
     }
   }
@@ -281,62 +293,143 @@ class CacheService {
    */
   async deleteDAOsByChain(chainId) {
     try {
-      await db.query('DELETE FROM daos WHERE chain_id = $1', [chainId]);
+      await db.query("DELETE FROM daos WHERE chain_id = $1", [chainId]);
       logger.info(`Deleted all DAOs for chain ${chainId}`);
       return true;
     } catch (error) {
-      logger.error('Error deleting DAOs:', error);
+      logger.error("Error deleting DAOs:", error);
       return false;
     }
   }
 
-/**
- * Get DAOs created since a specific timestamp
- */
-async getDAOsSinceTimestamp(chainId, sinceTimestamp, limit = 100) {
-  try {
-    // Convert milliseconds to seconds for comparison with created_at
-    const sinceTimestampSeconds = Math.floor(sinceTimestamp / 1000);
-    
-    const query = `
+  /**
+   * Get DAOs created since a specific timestamp
+   */
+  /**
+   * Get DAOs created since a specific timestamp
+   * ✅ Expects sinceTimestamp in Unix SECONDS (matches created_at column).
+   *    Do NOT divide — the frontend now sends seconds after the client-side fix.
+   */
+  async getDAOsSinceTimestamp(chainId, sinceTimestamp, limit = 100) {
+    try {
+      const query = `
       SELECT * FROM daos 
       WHERE chain_id = $1 
         AND created_at > $2
-      ORDER BY created_at DESC 
+      ORDER BY created_at ASC
       LIMIT $3
     `;
-    
-    const result = await db.query(query, [chainId, sinceTimestampSeconds, limit]);
-    logger.debug(`Retrieved ${result.rows.length} new DAOs since timestamp ${sinceTimestamp}`); // ✅ Fixed: ( instead of `
-    return result.rows;
-  } catch (error) {
-    logger.error(`Error getting DAOs since timestamp:`, error); // ✅ Fixed: ( instead of `
-    return [];
+
+      const result = await db.query(query, [chainId, sinceTimestamp, limit]);
+      logger.debug(
+        `Retrieved ${result.rows.length} new DAOs since ${sinceTimestamp}`,
+      );
+      return result.rows;
+    } catch (error) {
+      logger.error("Error getting DAOs since timestamp:", error);
+      return [];
+    }
   }
-}
+
+  /**
+   * Batch save DAOs
+   * ✅ Fixed: saveDAO must run on the same client as BEGIN/COMMIT,
+   *    not on the pool. Pass the client through explicitly.
+   */
+  async batchSaveDAOs(daos) {
+    const client = await db.getClient();
+
+    try {
+      await client.query("BEGIN");
+
+      for (const dao of daos) {
+        await this._saveDAOWithClient(client, dao); // ← use transaction client
+      }
+
+      await client.query("COMMIT");
+      logger.success(`Batch saved ${daos.length} DAOs`);
+      return true;
+    } catch (error) {
+      await client.query("ROLLBACK");
+      logger.error("Error batch saving DAOs:", error);
+      throw error;
+    } finally {
+      client.release();
+    }
+  }
+
+  /**
+   * Internal: save a single DAO using an explicit client (for transactions).
+   * The public saveDAO() keeps using the pool for standalone saves.
+   */
+  async _saveDAOWithClient(client, daoData) {
+    const query = `
+    INSERT INTO daos (
+      dao_address, token_address, chain_id, chain_name, genre, genre_id,
+      dao_name, image_url, threshold, quorum, voting_period_hours,
+      timelock_period_hours, created_at, created_at_date, explorer, explorer_url,
+      cached_at, updated_at
+    ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,NOW(),NOW())
+    ON CONFLICT (dao_address, chain_id)
+    DO UPDATE SET
+      token_address         = EXCLUDED.token_address,
+      genre                 = EXCLUDED.genre,
+      genre_id              = EXCLUDED.genre_id,
+      dao_name              = EXCLUDED.dao_name,
+      image_url             = EXCLUDED.image_url,
+      threshold             = EXCLUDED.threshold,
+      quorum                = EXCLUDED.quorum,
+      voting_period_hours   = EXCLUDED.voting_period_hours,
+      timelock_period_hours = EXCLUDED.timelock_period_hours,
+      explorer              = EXCLUDED.explorer,
+      explorer_url          = EXCLUDED.explorer_url,
+      updated_at            = NOW()
+  `;
+
+    const values = [
+      daoData.daoAddress,
+      daoData.tokenAddress,
+      daoData.chainId,
+      daoData.chainName,
+      daoData.genre,
+      daoData.genreId,
+      daoData.daoName,
+      daoData.imageUrl,
+      daoData.threshold,
+      daoData.quorum,
+      daoData.votingPeriodHours,
+      daoData.timelockPeriodHours,
+      daoData.createdAt,
+      daoData.createdAtDate,
+      daoData.explorer,
+      daoData.explorerUrl,
+    ];
+
+    await client.query(query, values);
+  }
   /**
    * Get cache statistics
    */
   async getStats() {
     try {
-      const totalQuery = 'SELECT COUNT(*) as total FROM daos';
+      const totalQuery = "SELECT COUNT(*) as total FROM daos";
       const chainsQuery = `
         SELECT chain_id, chain_name, COUNT(*) as count 
         FROM daos 
         GROUP BY chain_id, chain_name
       `;
-      
+
       const [totalResult, chainsResult] = await Promise.all([
         db.query(totalQuery),
         db.query(chainsQuery),
       ]);
-      
+
       return {
         totalDAOs: parseInt(totalResult.rows[0].total),
         byChain: chainsResult.rows,
       };
     } catch (error) {
-      logger.error('Error getting stats:', error);
+      logger.error("Error getting stats:", error);
       return { totalDAOs: 0, byChain: [] };
     }
   }

@@ -58,48 +58,56 @@ router.get("/daos/sync", async (req, res) => {
   try {
     const { chainId, lastSyncTimestamp, limit = 100 } = req.query;
 
-    logger.info(
-      `GET /api/daos/sync - chainId: ${chainId}, lastSyncTimestamp: ${lastSyncTimestamp}`,
-    );
-
     if (!chainId) {
-      return res.status(400).json({
-        success: false,
-        error: "chainId is required",
-      });
+      return res
+        .status(400)
+        .json({ success: false, error: "chainId is required" });
     }
 
-    // Get DAOs updated after lastSyncTimestamp
-    const newDAOs = await cacheService.getDAOsSinceTimestamp(
-      parseInt(chainId),
-      parseInt(lastSyncTimestamp) || 0,
-      parseInt(limit),
+    const parsedChainId = parseInt(chainId);
+    const parsedLimit = parseInt(limit);
+
+    // ✅ Input is already Unix seconds from the client — use directly.
+    //    Guard: if someone passes ms by mistake (13 digits), normalize it.
+    const rawTs = parseInt(lastSyncTimestamp) || 0;
+    const sinceSeconds =
+      rawTs > 9_999_999_999 ? Math.floor(rawTs / 1000) : rawTs;
+
+    logger.info(
+      `GET /api/daos/sync - chainId: ${parsedChainId}, since: ${sinceSeconds}`,
     );
 
-    // Get current total count
-    const totalDAOs = await cacheService.getTotalDAOsCount(parseInt(chainId));
+    // ✅ Trigger a fresh blockchain fetch before querying the DB.
+    //    This is what actually picks up newly deployed DAOs.
+    //    fetchDAOsFromChain has its own staleness guard so it won't
+    //    hammer the RPC on every sync poll.
+    await blockchainService.fetchDAOsFromChain(parsedChainId, 0, 100);
 
-    // Get sync metadata
-    const syncMetadata = await cacheService.getSyncMetadata(parseInt(chainId));
+    const newDAOs = await cacheService.getDAOsSinceTimestamp(
+      parsedChainId,
+      sinceSeconds,
+      parsedLimit,
+    );
+    const totalDAOs = await cacheService.getTotalDAOsCount(parsedChainId);
+    const syncMetadata = await cacheService.getSyncMetadata(parsedChainId);
 
-    logger.info(`Sync result: ${newDAOs.length} new DAOs found`);
+    logger.info(
+      `Sync result: ${newDAOs.length} new DAOs found since ${sinceSeconds}`,
+    );
 
     res.json({
       success: true,
       data: {
         daos: newDAOs,
-        hasMore: newDAOs.length === parseInt(limit),
+        hasMore: newDAOs.length === parsedLimit,
         totalDAOs,
-        syncTimestamp: Date.now(),
+        syncTimestamp: Math.floor(Date.now() / 1000), // ✅ seconds, not ms
         lastBackendSync: syncMetadata?.last_sync_at || null,
       },
     });
   } catch (error) {
     logger.error("Error in GET /api/daos/sync:", error);
-    res.status(500).json({
-      success: false,
-      error: error.message,
-    });
+    res.status(500).json({ success: false, error: error.message });
   }
 });
 
