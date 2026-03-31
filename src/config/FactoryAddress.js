@@ -15,12 +15,12 @@ export const FACTORY_ADDRESSES = {
 
   BSC: {
     chainId: 56,
-    address: '0x3c181eaaB64052c726194Da6797EA06DD15e8E6B', // Not deployed yet
+    address: "0x3c181eaaB64052c726194Da6797EA06DD15e8E6B", // Not deployed yet
   },
 
   ARBITRUM: {
     chainId: 42161,
-    address: '0x3c181eaaB64052c726194Da6797EA06DD15e8E6B',
+    address: "0x3c181eaaB64052c726194Da6797EA06DD15e8E6B",
   },
 
   // OPTIMISM: {
@@ -30,27 +30,23 @@ export const FACTORY_ADDRESSES = {
 
   AVALANCHE: {
     chainId: 43114,
-    address: '0x3c181eaaB64052c726194Da6797EA06DD15e8E6B',
+    address: "0x3c181eaaB64052c726194Da6797EA06DD15e8E6B",
   },
 
   BASE: {
     chainId: 8453,
-    address: '0x616f59CCc6951958C6177574AEDCe4A83caF8360',
+    address: "0x69db1Ea748Aa83214c99ab1109fc34eba94734C0",
   },
 
   BASE_SEPOLIA: {
     chainId: 84532,
-    address: '0x4B3AD106552927494E0DB019170c1E5d4E5D08Eb',
+    address: "0x4B3AD106552927494E0DB019170c1E5d4E5D08Eb",
   },
-
-
 
   // ABSTRACT: {
   //   chainId: 2741,
   //   address: null, // Deploy factory here
   // },
-
-
 };
 
 /**
@@ -58,7 +54,7 @@ export const FACTORY_ADDRESSES = {
  */
 export const getFactoryAddress = (chainId) => {
   const chain = Object.values(FACTORY_ADDRESSES).find(
-    (c) => c.chainId === chainId
+    (c) => c.chainId === chainId,
   );
   return chain?.address || null;
 };

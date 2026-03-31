@@ -1,31 +1,49 @@
 // routes/daoRoutes.js
-import express from 'express';
-import blockchainService from '../services/blockchainService.js';
-import cacheService from '../services/cacheService.js';
-import logger from '../utils/logger.js';
-import { SUPPORTED_CHAINS } from '../config/chains.js';
+import express from "express";
+import blockchainService from "../services/blockchainService.js";
+import cacheService from "../services/cacheService.js";
+import logger from "../utils/logger.js";
+import { SUPPORTED_CHAINS } from "../config/chains.js";
 
 const router = express.Router();
+
+// ============================================================
+// ✅ ROUTE ORDER MATTERS IN EXPRESS — most specific routes first,
+//    wildcard/dynamic routes last.
+// ============================================================
+
+/**
+ * GET /api/health
+ * Health check endpoint
+ */
+router.get("/health", (req, res) => {
+  res.json({
+    success: true,
+    message: "Server is running",
+    timestamp: new Date().toISOString(),
+    uptime: process.uptime(),
+  });
+});
 
 /**
  * GET /api/daos
  * Get all DAOs from all chains
  */
-router.get('/daos', async (req, res) => {
+router.get("/daos", async (req, res) => {
   try {
-    logger.info('GET /api/daos - Fetching all DAOs');
+    logger.info("GET /api/daos - Fetching all DAOs");
     const daos = await blockchainService.fetchAllDAOs();
-    
+
     res.json({
       success: true,
       count: daos.length,
       data: daos,
     });
   } catch (error) {
-    logger.error('Error in GET /api/daos:', error);
+    logger.error("Error in GET /api/daos:", error);
     res.status(500).json({
       success: false,
-      error: 'Failed to fetch DAOs',
+      error: "Failed to fetch DAOs",
       message: error.message,
     });
   }
@@ -33,18 +51,21 @@ router.get('/daos', async (req, res) => {
 
 /**
  * GET /api/daos/sync
- * ✅ NEW: Incremental sync - only returns DAOs created/updated after lastSyncTimestamp
+ * Incremental sync - only returns DAOs created/updated after lastSyncTimestamp
+ * ✅ Must be before /daos/:chainId/:daoAddress to avoid being caught by wildcard
  */
-router.get('/daos/sync', async (req, res) => {
+router.get("/daos/sync", async (req, res) => {
   try {
     const { chainId, lastSyncTimestamp, limit = 100 } = req.query;
 
-    logger.info(`GET /api/daos/sync - chainId: ${chainId}, lastSyncTimestamp: ${lastSyncTimestamp}`);
+    logger.info(
+      `GET /api/daos/sync - chainId: ${chainId}, lastSyncTimestamp: ${lastSyncTimestamp}`,
+    );
 
     if (!chainId) {
-      return res.status(400).json({ 
-        success: false, 
-        error: 'chainId is required' 
+      return res.status(400).json({
+        success: false,
+        error: "chainId is required",
       });
     }
 
@@ -52,7 +73,7 @@ router.get('/daos/sync', async (req, res) => {
     const newDAOs = await cacheService.getDAOsSinceTimestamp(
       parseInt(chainId),
       parseInt(lastSyncTimestamp) || 0,
-      parseInt(limit)
+      parseInt(limit),
     );
 
     // Get current total count
@@ -74,10 +95,10 @@ router.get('/daos/sync', async (req, res) => {
       },
     });
   } catch (error) {
-    logger.error('Error in GET /api/daos/sync:', error);
-    res.status(500).json({ 
-      success: false, 
-      error: error.message 
+    logger.error("Error in GET /api/daos/sync:", error);
+    res.status(500).json({
+      success: false,
+      error: error.message,
     });
   }
 });
@@ -85,17 +106,24 @@ router.get('/daos/sync', async (req, res) => {
 /**
  * GET /api/daos/chain/:chainId
  * Get DAOs from a specific chain
+ * ✅ Must be before /daos/:chainId/:daoAddress
  */
-router.get('/daos/chain/:chainId', async (req, res) => {
+router.get("/daos/chain/:chainId", async (req, res) => {
   try {
     const chainId = parseInt(req.params.chainId);
     const offset = parseInt(req.query.offset) || 0;
     const limit = parseInt(req.query.limit) || 100;
 
-    logger.info(`GET /api/daos/chain/${chainId} - offset: ${offset}, limit: ${limit}`);
+    logger.info(
+      `GET /api/daos/chain/${chainId} - offset: ${offset}, limit: ${limit}`,
+    );
 
-    const daos = await blockchainService.fetchDAOsFromChain(chainId, offset, limit);
-    
+    const daos = await blockchainService.fetchDAOsFromChain(
+      chainId,
+      offset,
+      limit,
+    );
+
     res.json({
       success: true,
       chainId,
@@ -108,34 +136,7 @@ router.get('/daos/chain/:chainId', async (req, res) => {
     logger.error(`Error in GET /api/daos/chain/${req.params.chainId}:`, error);
     res.status(500).json({
       success: false,
-      error: 'Failed to fetch DAOs for chain',
-      message: error.message,
-    });
-  }
-});
-
-/**
- * GET /api/daos/:chainId/:daoAddress
- * Get specific DAO by address and chain
- */
-router.get('/daos/:chainId/:daoAddress', async (req, res) => {
-  try {
-    const chainId = parseInt(req.params.chainId);
-    const { daoAddress } = req.params;
-
-    logger.info(`GET /api/daos/${chainId}/${daoAddress}`);
-
-    const dao = await blockchainService.getDAOByAddress(chainId, daoAddress);
-    
-    res.json({
-      success: true,
-      data: dao,
-    });
-  } catch (error) {
-    logger.error(`Error in GET /api/daos/${req.params.chainId}/${req.params.daoAddress}:`, error);
-    res.status(404).json({
-      success: false,
-      error: 'DAO not found',
+      error: "Failed to fetch DAOs for chain",
       message: error.message,
     });
   }
@@ -144,8 +145,9 @@ router.get('/daos/:chainId/:daoAddress', async (req, res) => {
 /**
  * GET /api/daos/genre/:chainId/:genreId
  * Get DAOs by genre from a specific chain
+ * ✅ Must be before /daos/:chainId/:daoAddress
  */
-router.get('/daos/genre/:chainId/:genreId', async (req, res) => {
+router.get("/daos/genre/:chainId/:genreId", async (req, res) => {
   try {
     const chainId = parseInt(req.params.chainId);
     const genreId = parseInt(req.params.genreId);
@@ -154,8 +156,13 @@ router.get('/daos/genre/:chainId/:genreId', async (req, res) => {
 
     logger.info(`GET /api/daos/genre/${chainId}/${genreId}`);
 
-    const daos = await blockchainService.getDAOsByGenre(chainId, genreId, offset, limit);
-    
+    const daos = await blockchainService.getDAOsByGenre(
+      chainId,
+      genreId,
+      offset,
+      limit,
+    );
+
     res.json({
       success: true,
       chainId,
@@ -164,10 +171,44 @@ router.get('/daos/genre/:chainId/:genreId', async (req, res) => {
       data: daos,
     });
   } catch (error) {
-    logger.error(`Error in GET /api/daos/genre/${req.params.chainId}/${req.params.genreId}:`, error);
+    logger.error(
+      `Error in GET /api/daos/genre/${req.params.chainId}/${req.params.genreId}:`,
+      error,
+    );
     res.status(500).json({
       success: false,
-      error: 'Failed to fetch DAOs by genre',
+      error: "Failed to fetch DAOs by genre",
+      message: error.message,
+    });
+  }
+});
+
+/**
+ * GET /api/daos/:chainId/:daoAddress
+ * Get specific DAO by address and chain
+ * ✅ Wildcard route — must be LAST among /daos/* routes
+ */
+router.get("/daos/:chainId/:daoAddress", async (req, res) => {
+  try {
+    const chainId = parseInt(req.params.chainId);
+    const { daoAddress } = req.params;
+
+    logger.info(`GET /api/daos/${chainId}/${daoAddress}`);
+
+    const dao = await blockchainService.getDAOByAddress(chainId, daoAddress);
+
+    res.json({
+      success: true,
+      data: dao,
+    });
+  } catch (error) {
+    logger.error(
+      `Error in GET /api/daos/${req.params.chainId}/${req.params.daoAddress}:`,
+      error,
+    );
+    res.status(404).json({
+      success: false,
+      error: "DAO not found",
       message: error.message,
     });
   }
@@ -177,9 +218,9 @@ router.get('/daos/genre/:chainId/:genreId', async (req, res) => {
  * GET /api/chains
  * Get all supported chains
  */
-router.get('/chains', (req, res) => {
+router.get("/chains", (req, res) => {
   try {
-    const chains = Object.values(SUPPORTED_CHAINS).map(chain => ({
+    const chains = Object.values(SUPPORTED_CHAINS).map((chain) => ({
       id: chain.id,
       name: chain.name,
       symbol: chain.symbol,
@@ -195,10 +236,10 @@ router.get('/chains', (req, res) => {
       data: chains,
     });
   } catch (error) {
-    logger.error('Error in GET /api/chains:', error);
+    logger.error("Error in GET /api/chains:", error);
     res.status(500).json({
       success: false,
-      error: 'Failed to fetch chains',
+      error: "Failed to fetch chains",
       message: error.message,
     });
   }
@@ -208,10 +249,10 @@ router.get('/chains', (req, res) => {
  * GET /api/stats
  * Get statistics about DAOs
  */
-router.get('/stats', async (req, res) => {
+router.get("/stats", async (req, res) => {
   try {
-    logger.info('GET /api/stats - Fetching statistics');
-    
+    logger.info("GET /api/stats - Fetching statistics");
+
     const stats = await cacheService.getStats();
 
     res.json({
@@ -219,10 +260,10 @@ router.get('/stats', async (req, res) => {
       data: stats,
     });
   } catch (error) {
-    logger.error('Error in GET /api/stats:', error);
+    logger.error("Error in GET /api/stats:", error);
     res.status(500).json({
       success: false,
-      error: 'Failed to fetch statistics',
+      error: "Failed to fetch statistics",
       message: error.message,
     });
   }
@@ -232,12 +273,12 @@ router.get('/stats', async (req, res) => {
  * POST /api/cache/clear
  * Clear cache (useful for debugging)
  */
-router.post('/cache/clear', async (req, res) => {
+router.post("/cache/clear", async (req, res) => {
   try {
     const { chainId } = req.body;
-    
-    logger.info(`POST /api/cache/clear - chainId: ${chainId || 'all'}`);
-    
+
+    logger.info(`POST /api/cache/clear - chainId: ${chainId || "all"}`);
+
     if (chainId) {
       await cacheService.deleteDAOsByChain(parseInt(chainId));
     } else {
@@ -246,32 +287,19 @@ router.post('/cache/clear', async (req, res) => {
         await cacheService.deleteDAOsByChain(chain.id);
       }
     }
-    
+
     res.json({
       success: true,
-      message: 'Cache cleared successfully',
+      message: "Cache cleared successfully",
     });
   } catch (error) {
-    logger.error('Error in POST /api/cache/clear:', error);
+    logger.error("Error in POST /api/cache/clear:", error);
     res.status(500).json({
       success: false,
-      error: 'Failed to clear cache',
+      error: "Failed to clear cache",
       message: error.message,
     });
   }
-});
-
-/**
- * GET /api/health
- * Health check endpoint
- */
-router.get('/health', (req, res) => {
-  res.json({
-    success: true,
-    message: 'Server is running',
-    timestamp: new Date().toISOString(),
-    uptime: process.uptime(),
-  });
 });
 
 export default router;

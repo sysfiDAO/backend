@@ -9,6 +9,8 @@ import daoRoutes from "./routes/daoRoutes.js";
 import tokenRoutes from "./routes/tokenRoutes.js";
 import blockchainService from "./services/blockchainService.js";
 import logger from "./utils/logger.js";
+import swapRoutes from "./routes/SwapRoutes.js";
+import swapTrackingRoutes from "./routes/swapTrackingRoutes.js";
 
 const app = express();
 const PORT = process.env.PORT || 5000;
@@ -27,6 +29,8 @@ app.use((req, res, next) => {
 // Mount routes
 app.use("/api", daoRoutes);
 app.use("/api/tokens", tokenRoutes);
+app.use("/api/swap", swapRoutes);
+// app.use("/api/swap", swapTrackingRoutes);
 
 // Root endpoint
 app.get("/", (req, res) => {
