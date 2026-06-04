@@ -1,5 +1,5 @@
 // services/cacheService.js
-import db from '../config/db.js';
+import db from '../db/postgres.js';
 import logger from '../utils/logger.js';
 
 class CacheService {
@@ -61,31 +61,6 @@ class CacheService {
     } catch (error) {
       logger.error("Error saving DAO:", error);
       throw error;
-    }
-  }
-
-  /**
-   * Batch save DAOs
-   */
-  async batchSaveDAOs(daos) {
-    const client = await db.getClient();
-
-    try {
-      await client.query("BEGIN");
-
-      for (const dao of daos) {
-        await this.saveDAO(dao);
-      }
-
-      await client.query("COMMIT");
-      logger.success(`Batch saved ${daos.length} DAOs`);
-      return true;
-    } catch (error) {
-      await client.query("ROLLBACK");
-      logger.error("Error batch saving DAOs:", error);
-      throw error;
-    } finally {
-      client.release();
     }
   }
 
@@ -312,18 +287,21 @@ class CacheService {
    */
   async getDAOsSinceTimestamp(chainId, sinceTimestamp, limit = 100) {
     try {
+      // updated_at is refreshed on every upsert (INSERT or ON CONFLICT UPDATE).
+      // cached_at is only set on first INSERT and never changes — so it drifts
+      // behind the client's cursor whenever the server re-indexes existing DAOs.
+      // Using updated_at means any blockchain re-fetch (which touches updated_at)
+      // will surface those rows to the next incremental sync.
       const query = `
-      SELECT * FROM daos 
-      WHERE chain_id = $1 
-        AND created_at > $2
-      ORDER BY created_at ASC
-      LIMIT $3
-    `;
+        SELECT * FROM daos
+        WHERE chain_id = $1
+          AND updated_at > TO_TIMESTAMP($2)
+        ORDER BY updated_at ASC
+        LIMIT $3
+      `;
 
       const result = await db.query(query, [chainId, sinceTimestamp, limit]);
-      logger.debug(
-        `Retrieved ${result.rows.length} new DAOs since ${sinceTimestamp}`,
-      );
+      logger.debug(`Retrieved ${result.rows.length} new/updated DAOs since ${sinceTimestamp}`);
       return result.rows;
     } catch (error) {
       logger.error("Error getting DAOs since timestamp:", error);
@@ -407,6 +385,24 @@ class CacheService {
 
     await client.query(query, values);
   }
+  /**
+   * Return the latest updated_at value for a chain as Unix seconds.
+   * This is the correct sync cursor: it reflects the last time any row was written,
+   * which is always after (or equal to) what the query filter uses.
+   */
+  async getLatestUpdatedAt(chainId) {
+    try {
+      const result = await db.query(
+        `SELECT EXTRACT(EPOCH FROM MAX(updated_at))::bigint AS ts FROM daos WHERE chain_id = $1`,
+        [chainId],
+      );
+      return result.rows[0]?.ts ? Number(result.rows[0].ts) : 0;
+    } catch (error) {
+      logger.error("Error getting latest updated_at:", error);
+      return 0;
+    }
+  }
+
   /**
    * Get cache statistics
    */

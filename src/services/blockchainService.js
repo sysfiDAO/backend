@@ -9,7 +9,9 @@ class BlockchainService {
   constructor() {
     this.clients = {};
     this.eventListeners = {};
-    this.isListening = false;
+    this.isListening  = false;
+    // Per-chain sync lock: prevents concurrent blockchain fetches for the same chain
+    this._syncLocks = {};
     this.initializeClients();
   }
 
@@ -28,7 +30,11 @@ class BlockchainService {
       try {
         this.clients[chainConfig.id] = createPublicClient({
           chain: chainConfig.chain,
-          transport: http(chainConfig.rpcUrl),
+          transport: http(chainConfig.rpcUrl, {
+            timeout:      10_000,  // abort RPC calls that take > 10 s
+            retryCount:   2,       // retry transient failures twice
+            retryDelay:   500,
+          }),
         });
         logger.success(`Client initialized for ${chainConfig.name}`);
       } catch (error) {
@@ -96,61 +102,88 @@ class BlockchainService {
   }
 
   /**
-   * Fetch DAOs from a specific chain with pagination
+   * Fetch DAOs from a specific chain with pagination.
+   * Per-chain lock prevents duplicate concurrent syncs.
    */
   async fetchDAOsFromChain(chainId, offset = 0, limit = 100) {
+    const chainConfig = this.getChainConfig(chainId);
+
+    if (!chainConfig) {
+      logger.warn(`Chain ${chainId} not configured, skipping`);
+      return [];
+    }
+
+    // Serve from PostgreSQL if data is fresh (60 s — catches new DAOs faster).
+    // But if PostgreSQL has 0 rows (e.g. after a bug cleared the table, or first
+    // boot before indexing), always re-fetch from blockchain regardless of the
+    // staleness timer — empty DB is never a valid cache hit.
+    const isStale = await cacheService.isSyncStale(chainId, 60);
+    if (!isStale) {
+      const existing = await cacheService.getDAOsByChain(chainId, offset, limit);
+      if (existing.length > 0) {
+        logger.info(`Using cached data for ${chainConfig.name} (${existing.length} rows)`);
+        return existing;
+      }
+      logger.warn(`${chainConfig.name}: sync is fresh but PostgreSQL is empty — forcing blockchain re-fetch`);
+    }
+
+    // If another caller is already syncing this chain, wait for it then read DB
+    if (this._syncLocks[chainId]) {
+      logger.info(`${chainConfig.name} sync already in progress — waiting`);
+      await this._syncLocks[chainId];
+      return cacheService.getDAOsByChain(chainId, offset, limit);
+    }
+
+    const client = this.clients[chainId];
+    if (!client || !chainConfig.factoryAddress) {
+      logger.warn(`Chain ${chainId} not properly configured`);
+      return cacheService.getDAOsByChain(chainId, offset, limit);
+    }
+
+    // Acquire lock
+    let resolveLock;
+    this._syncLocks[chainId] = new Promise((r) => { resolveLock = r; });
+
     try {
-      const chainConfig = this.getChainConfig(chainId);
-
-      if (!chainConfig) {
-        logger.warn(`Chain ${chainId} not configured, skipping...`);
-        return [];
-      }
-
-      // ✅ Check if we have recent data in PostgreSQL
-      const isStale = await cacheService.isSyncStale(chainId, 300); // 5 minutes
-      
-      if (!isStale) {
-        logger.info(`Using cached data for ${chainConfig.name}`);
-        return await cacheService.getDAOsByChain(chainId, offset, limit);
-      }
-
-      // ✅ Fetch fresh data from blockchain
-      const client = this.clients[chainId];
-      
-      if (!client || !chainConfig.factoryAddress) {
-        logger.warn(`Chain ${chainId} not properly configured`);
-        return await cacheService.getDAOsByChain(chainId, offset, limit);
-      }
-
-      logger.chain(chainConfig.name, `Fetching DAOs from blockchain (offset: ${offset}, limit: ${limit})`);
+      // Cap the blockchain call at 100 — contracts commonly reject larger limits
+      // or return empty arrays for them. PostgreSQL serves any limit once indexed.
+      const BLOCKCHAIN_PAGE = 100;
+      logger.chain(chainConfig.name, `Fetching DAOs from blockchain (offset:${offset}, limit:${BLOCKCHAIN_PAGE})`);
 
       const daos = await client.readContract({
-        address: chainConfig.factoryAddress,
-        abi: DAO_FACTORY_ABI,
+        address:      chainConfig.factoryAddress,
+        abi:          DAO_FACTORY_ABI,
         functionName: 'getDeployedDAOs',
-        args: [BigInt(offset), BigInt(limit)],
+        args:         [BigInt(offset), BigInt(BLOCKCHAIN_PAGE)],
       });
 
-      const formattedDAOs = daos.map(dao => this.formatDAOData(dao, chainId));
-      
-      // ✅ Save to PostgreSQL
+      const formattedDAOs = daos.map((dao) => this.formatDAOData(dao, chainId));
+
       if (formattedDAOs.length > 0) {
         await cacheService.batchSaveDAOs(formattedDAOs);
+        const total = await this.getTotalDAOs(chainId);
+        await cacheService.updateSyncMetadata(chainId, chainConfig.name, total, 'synced');
+        logger.success(`Fetched ${formattedDAOs.length} DAOs from ${chainConfig.name}`);
+      } else {
+        // Blockchain returned empty — either no DAOs or contract rejected the args.
+        // Serve from PostgreSQL so we don't replace valid cached data with nothing.
+        const dbRows = await cacheService.getDAOsByChain(chainId, offset, limit);
+        if (dbRows.length > 0) {
+          logger.warn(`${chainConfig.name}: blockchain returned 0, serving ${dbRows.length} from PostgreSQL`);
+          return dbRows;
+        }
+        await cacheService.updateSyncMetadata(chainId, chainConfig.name, 0, 'synced');
+        logger.info(`${chainConfig.name}: genuinely 0 DAOs`);
       }
-      
-      // ✅ Update sync metadata
-      const total = await this.getTotalDAOs(chainId);
-      await cacheService.updateSyncMetadata(chainId, chainConfig.name, total, 'synced');
-      
-      logger.success(`Fetched and saved ${formattedDAOs.length} DAOs from ${chainConfig.name}`);
-      
+
       return formattedDAOs;
     } catch (error) {
       logger.error(`Error fetching DAOs from chain ${chainId}:`, error);
-      
-      // ✅ Fallback to database on error
-      return await cacheService.getDAOsByChain(chainId, offset, limit);
+      return cacheService.getDAOsByChain(chainId, offset, limit);
+    } finally {
+      // Release lock
+      delete this._syncLocks[chainId];
+      resolveLock();
     }
   }
 

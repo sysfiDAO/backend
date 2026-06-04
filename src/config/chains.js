@@ -116,7 +116,7 @@ export const SUPPORTED_CHAINS = {
   //   },
 };
 
-export const DEFAULT_CHAIN = SUPPORTED_CHAINS.BASE_SEPOLIA;
+export const DEFAULT_CHAIN = SUPPORTED_CHAINS.BASE;
 
 export const getChainById = (chainId) =>
   Object.values(SUPPORTED_CHAINS).find((chain) => chain.id === chainId);

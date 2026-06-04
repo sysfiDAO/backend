@@ -1,65 +1,61 @@
+import pino from 'pino';
+
+const IS_DEV = process.env.NODE_ENV !== 'production';
+
+const pinoInstance = pino({
+  level: IS_DEV ? 'debug' : 'info',
+  ...(IS_DEV && {
+    transport: {
+      target: 'pino-pretty',
+      options: {
+        colorize: true,
+        translateTime: 'SYS:HH:MM:ss.l',
+        ignore: 'pid,hostname',
+        messageFormat: '{msg}',
+      },
+    },
+  }),
+  ...(!IS_DEV && {
+    formatters: { level: (label) => ({ level: label }) },
+    timestamp: pino.stdTimeFunctions.isoTime,
+    redact: ['req.headers.authorization', 'req.headers.cookie'],
+  }),
+});
+
+// Maintain the existing public interface so all callers continue to work unchanged.
+// In dev, pino-pretty renders coloured output. In prod, structured JSON goes to stdout.
 class Logger {
-  constructor() {
-    this.colors = {
-      reset: '\x1b[0m',
-      bright: '\x1b[1m',
-      dim: '\x1b[2m',
-      red: '\x1b[31m',
-      green: '\x1b[32m',
-      yellow: '\x1b[33m',
-      blue: '\x1b[34m',
-      magenta: '\x1b[35m',
-      cyan: '\x1b[36m',
-    };
-  }
-
-  getTimestamp() {
-    return new Date().toISOString();
-  }
-
   info(message, data = null) {
-    console.log(
-      `${this.colors.blue}[INFO]${this.colors.reset} ${this.colors.dim}${this.getTimestamp()}${this.colors.reset} - ${message}`
-    );
-    if (data) console.log(data);
+    data ? pinoInstance.info(data, message) : pinoInstance.info(message);
   }
 
   success(message, data = null) {
-    console.log(
-      `${this.colors.green}[SUCCESS]${this.colors.reset} ${this.colors.dim}${this.getTimestamp()}${this.colors.reset} - ${message}`
-    );
-    if (data) console.log(data);
+    if (data) {
+      pinoInstance.info({ ...data, success: true }, message);
+    } else {
+      pinoInstance.info({ success: true }, message);
+    }
   }
 
   warn(message, data = null) {
-    console.warn(
-      `${this.colors.yellow}[WARN]${this.colors.reset} ${this.colors.dim}${this.getTimestamp()}${this.colors.reset} - ${message}`
-    );
-    if (data) console.warn(data);
+    data ? pinoInstance.warn(data, message) : pinoInstance.warn(message);
   }
 
   error(message, error = null) {
-    console.error(
-      `${this.colors.red}[ERROR]${this.colors.reset} ${this.colors.dim}${this.getTimestamp()}${this.colors.reset} - ${message}`
-    );
-    if (error) {
-      console.error(error);
-    }
+    error ? pinoInstance.error({ err: error }, message) : pinoInstance.error(message);
   }
 
   debug(message, data = null) {
-    if (process.env.NODE_ENV === 'development') {
-      console.log(
-        `${this.colors.magenta}[DEBUG]${this.colors.reset} ${this.colors.dim}${this.getTimestamp()}${this.colors.reset} - ${message}`
-      );
-      if (data) console.log(data);
-    }
+    data ? pinoInstance.debug(data, message) : pinoInstance.debug(message);
   }
 
   chain(chainName, message) {
-    console.log(
-      `${this.colors.cyan}[${chainName}]${this.colors.reset} ${this.colors.dim}${this.getTimestamp()}${this.colors.reset} - ${message}`
-    );
+    pinoInstance.info({ chain: chainName }, message);
+  }
+
+  // Expose the raw pino instance for pino-http
+  get raw() {
+    return pinoInstance;
   }
 }
 

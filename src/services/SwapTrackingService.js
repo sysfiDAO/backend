@@ -1,5 +1,5 @@
 // services/swapTrackingService.js
-import Database from "../config/db.js";
+import Database from "../db/postgres.js";
 
 // ─── Write ─────────────────────────────────────────────────────────────────
 
