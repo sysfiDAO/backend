@@ -5,8 +5,11 @@
   "main": "src/server.js",
   "type": "module",
   "scripts": {
-    "start": "node --import dotenv/config src/server.js",
-    "dev": "nodemon --import dotenv/config src/server.js",
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start",
+    "start:server": "node --import dotenv/config src/server.js",
+    "dev:server": "nodemon --import dotenv/config src/server.js",
     "migrate": "node --import dotenv/config src/scripts/migrate.js",
     "sync": "node --import dotenv/config src/scripts/sync.js",
     "test": "echo \"Error: no test specified\" && exit 1"
@@ -15,6 +18,9 @@
   "author": "",
   "license": "ISC",
   "dependencies": {
+    "next": "^14.2.0",
+    "react": "^18.3.0",
+    "react-dom": "^18.3.0",
     "axios": "^1.13.2",
     "bignumber.js": "^9.3.1",
     "bullmq": "^5.78.0",
