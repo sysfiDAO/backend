@@ -1,0 +1,14 @@
+node_modules
+.next
+.env
+.env.*
+logs
+*.log
+*.err
+dist
+build
+
+# Firebase / GCP service account keys — NEVER commit these
+*adminsdk*.json
+*service-account*.json
+*serviceAccount*.json
