@@ -15,13 +15,15 @@ export async function connectMongoDB() {
     connectTimeoutMS:         10_000,
     serverSelectionTimeoutMS: 10_000,
     socketTimeoutMS:          30_000,
+    heartbeatFrequencyMS:     30_000,
     maxPoolSize:              20,
     minPoolSize:              2,
     retryReads:  true,
     retryWrites: true,
+    compressors:  ['zlib'],  // wire compression for Atlas / remote hosts (zstd needs optional @mongodb-js/zstd)
     ...(IS_PROD && !MONGODB_URI.includes('localhost') && {
       tls: true,
-      tlsAllowInvalidCertificates: true,
+      // Do NOT set tlsAllowInvalidCertificates — rely on Node.js CA bundle for Atlas.
     }),
   });
 

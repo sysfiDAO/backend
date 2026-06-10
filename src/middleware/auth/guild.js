@@ -1,9 +1,18 @@
 import { getAdminAuth } from '../../lib/firebase.js';
+import { getCachedToken, cacheToken } from '../../lib/authTokenCache.js';
 import logger from '../../utils/logger.js';
+
+async function verifyToken(token) {
+  const cached = getCachedToken(token);
+  if (cached) return cached.decoded;
+  const decoded = await getAdminAuth().verifyIdToken(token);
+  cacheToken(token, decoded);
+  return decoded;
+}
 
 /**
  * Strict auth — rejects unauthenticated requests.
- * Sets req.uid (Firebase UID) and req.firebaseUser on success.
+ * Sets req.uid and req.firebaseUser on success.
  */
 export async function requireAuth(req, res, next) {
   const authHeader = req.headers.authorization;
@@ -11,9 +20,8 @@ export async function requireAuth(req, res, next) {
     return res.status(401).json({ success: false, error: 'Missing authorization token' });
   }
 
-  const token = authHeader.slice(7);
   try {
-    const decoded    = await getAdminAuth().verifyIdToken(token);
+    const decoded    = await verifyToken(authHeader.slice(7));
     req.uid          = decoded.uid;
     req.firebaseUser = decoded;
     next();
@@ -30,9 +38,8 @@ export async function optionalAuth(req, _res, next) {
   const authHeader = req.headers.authorization;
   if (!authHeader?.startsWith('Bearer ')) return next();
 
-  const token = authHeader.slice(7);
   try {
-    const decoded    = await getAdminAuth().verifyIdToken(token);
+    const decoded    = await verifyToken(authHeader.slice(7));
     req.uid          = decoded.uid;
     req.firebaseUser = decoded;
   } catch {

@@ -36,15 +36,18 @@ class Database {
       user:     process.env.DB_USER,
       password: process.env.DB_PASSWORD,
 
-      max: 15,
-      min: 0,
-      idleTimeoutMillis:       8_000,
-      connectionTimeoutMillis: 8_000,
-      statement_timeout:       20_000,
-      keepAlive:                    true,
-      keepAliveInitialDelayMillis:  10_000,
+      // DB_POOL_MAX lets you reduce the per-process cap when running cluster mode
+      // (e.g. DB_POOL_MAX=4 with 4 workers keeps total PG connections ≤ 16).
+      max:                         parseInt(process.env.DB_POOL_MAX || '15'),
+      min:                         2,   // keep 2 warm connections to avoid cold-start latency
+      idleTimeoutMillis:           30_000,
+      connectionTimeoutMillis:     8_000,
+      statement_timeout:           20_000,
+      query_timeout:               20_000,
+      keepAlive:                   true,
+      keepAliveInitialDelayMillis: 10_000,
 
-      ...(IS_PROD && { ssl: { rejectUnauthorized: false } }),
+      ...(IS_PROD && { ssl: { rejectUnauthorized: true } }),
     });
 
     this.pool.on('connect', (client) => {

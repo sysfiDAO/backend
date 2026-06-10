@@ -6,7 +6,8 @@
   "type": "module",
   "scripts": {
     "start": "node --import dotenv/config src/server.js",
-    "dev": "nodemon --import dotenv/config src/server.js",
+    "start:cluster": "node --import dotenv/config src/server.js",
+    "dev": "nodemon --import dotenv/config --watch src src/server.js",
     "migrate": "node --import dotenv/config src/scripts/migrate.js",
     "sync": "node --import dotenv/config src/scripts/sync.js",
     "test": "echo \"Error: no test specified\" && exit 1"
@@ -28,6 +29,7 @@
     "express": "^5.2.1",
     "express-mongo-sanitize": "^2.2.0",
     "express-rate-limit": "^8.5.2",
+    "express-slow-down": "^2.1.0",
     "firebase-admin": "^13.10.0",
     "helmet": "^8.2.0",
     "hpp": "^0.2.3",

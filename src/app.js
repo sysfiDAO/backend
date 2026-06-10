@@ -3,6 +3,7 @@ import cors from 'cors';
 import helmet from 'helmet';
 import compression from 'compression';
 import rateLimit, { ipKeyGenerator } from 'express-rate-limit';
+import slowDown from 'express-slow-down';
 import pinoHttp from 'pino-http';
 
 import { requestId } from './middleware/requestId.js';
@@ -16,9 +17,10 @@ import { getRedis } from './db/redis.js';
 import { getMongoDB } from './db/mongodb.js';
 
 export function createApp() {
-  const app = express();
+  const app    = express();
   const IS_PROD = process.env.NODE_ENV === 'production';
 
+  // Trust one proxy hop in production (nginx/load-balancer → correct req.ip for rate limits).
   app.set('trust proxy', IS_PROD ? 1 : false);
   app.set('etag', 'weak');
 
@@ -29,12 +31,36 @@ export function createApp() {
   app.use(
     helmet({
       crossOriginEmbedderPolicy: false,
-      contentSecurityPolicy: IS_PROD,
+      contentSecurityPolicy: IS_PROD
+        ? {
+            directives: {
+              defaultSrc:      ["'none'"],
+              connectSrc:      ["'self'"],
+              frameSrc:        ["'none'"],
+              objectSrc:       ["'none'"],
+              scriptSrc:       ["'none'"],
+              styleSrc:        ["'none'"],
+              imgSrc:          ["'none'"],
+              formAction:      ["'none'"],
+              frameAncestors:  ["'none'"],
+              upgradeInsecureRequests: [],
+            },
+          }
+        : false,
       hsts: IS_PROD
         ? { maxAge: 31_536_000, includeSubDomains: true, preload: true }
         : false,
     }),
   );
+
+  // Permissions-Policy — disable every powerful browser feature (pure API server).
+  app.use((_req, res, next) => {
+    res.setHeader(
+      'Permissions-Policy',
+      'camera=(), microphone=(), geolocation=(), payment=(), usb=(), interest-cohort=()',
+    );
+    next();
+  });
 
   // ─── CORS ────────────────────────────────────────────────────────────────────
   const ALLOWED_ORIGINS = process.env.ALLOWED_ORIGINS
@@ -68,8 +94,10 @@ export function createApp() {
   );
 
   // ─── Body parsing ─────────────────────────────────────────────────────────────
-  app.use(express.json({ limit: '100kb' }));
-  app.use(express.urlencoded({ extended: true, limit: '100kb' }));
+  // Default: 50 kb. Upload/guild routes that accept larger payloads override this
+  // at the router level with express.json({ limit: '100kb' }).
+  app.use(express.json({ limit: '50kb' }));
+  app.use(express.urlencoded({ extended: true, limit: '50kb' }));
 
   // ─── Input sanitisation ───────────────────────────────────────────────────────
   app.use(hppMiddleware);
@@ -93,11 +121,9 @@ export function createApp() {
   );
 
   // ─── Response-time header ─────────────────────────────────────────────────────
-  // Must intercept res.end() — res.on('finish') fires after headers are flushed
-  // and calling setHeader() there throws ERR_HTTP_HEADERS_SENT.
   app.use((req, res, next) => {
-    const start    = process.hrtime.bigint();
-    const origEnd  = res.end.bind(res);
+    const start   = process.hrtime.bigint();
+    const origEnd = res.end.bind(res);
     res.end = (...args) => {
       if (!res.headersSent) {
         const ms = Number(process.hrtime.bigint() - start) / 1e6;
@@ -108,8 +134,18 @@ export function createApp() {
     next();
   });
 
-  // ─── Rate limiting ────────────────────────────────────────────────────────────
+  // ─── Rate limiting + slow-down ────────────────────────────────────────────────
+  // keyByUidOrIp: prefer authenticated UID (set by auth middleware on guarded routes)
+  // so authenticated users have their own bucket rather than sharing an IP bucket.
   const keyByUidOrIp = (req) => req.uid || ipKeyGenerator(req);
+
+  // Slow-down: gradually adds delay before the hard rate-limit kicks in.
+  const generalSlowDown = slowDown({
+    windowMs: 60_000,
+    delayAfter: 80,           // start delaying after 80 req/min
+    delayMs: (hits) => (hits - 80) * 100, // +100 ms per excess request
+    keyGenerator: keyByUidOrIp,
+  });
 
   const generalLimiter = rateLimit({
     windowMs: 60_000, max: 120, keyGenerator: keyByUidOrIp,
@@ -135,11 +171,11 @@ export function createApp() {
     message: { success: false, error: 'Mint rate limit reached.' },
   });
 
-  app.use('/api', generalLimiter);
-  app.use('/api/v1/daos/sync', syncLimiter);
+  app.use('/api', generalSlowDown, generalLimiter);
+  app.use('/api/v1/daos/sync',     syncLimiter);
   app.use('/api/v1/daos/register', writeLimiter);
-  app.use('/api/v1/chat', writeLimiter);
-  app.use('/api/v1/mint', mintLimiter);
+  app.use('/api/v1/chat',          writeLimiter);
+  app.use('/api/v1/mint',          mintLimiter);
 
   // ─── Request timeout (30 s) ───────────────────────────────────────────────────
   app.use((req, res, next) => {
@@ -165,7 +201,12 @@ export function createApp() {
     res
       .status(healthy ? 200 : 503)
       .set('Cache-Control', 'no-store')
-      .json({ success: healthy, services: { pg, mongo, redis }, uptime: Math.floor(process.uptime()) });
+      .json({
+        success:  healthy,
+        services: { pg, mongo, redis },
+        uptime:   Math.floor(process.uptime()),
+        pid:      process.pid,
+      });
   });
 
   app.get('/', (_req, res) => {

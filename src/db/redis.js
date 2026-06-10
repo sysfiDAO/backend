@@ -10,6 +10,7 @@ export function connectRedis() {
 
   redis = new Redis(REDIS_URL, {
     retryStrategy(times) {
+      if (times > 20) return null; // stop retrying after ~100 s of failures
       const delay = Math.min(times * 300, 10_000);
       logger.warn(`Redis retry #${times} in ${delay}ms`);
       return delay;
@@ -19,6 +20,8 @@ export function connectRedis() {
       return err.message.includes('READONLY') || err.message.includes('LOADING');
     },
     connectTimeout:                10_000,
+    commandTimeout:                5_000,  // fail stuck commands instead of hanging forever
+    socketTimeout:                 10_000,
     keepAlive:                     10_000,
     enableOfflineQueue:            true,
     lazyConnect:                   true,
