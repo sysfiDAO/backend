@@ -65,7 +65,13 @@ export function createApp() {
   // ─── CORS ────────────────────────────────────────────────────────────────────
   const ALLOWED_ORIGINS = process.env.ALLOWED_ORIGINS
     ? process.env.ALLOWED_ORIGINS.split(',').map((o) => o.trim())
-    : ['http://localhost:3000', 'http://localhost:8081', 'http://localhost:19000'];
+    : [
+        'https://sysfidao.com',
+        'https://www.sysfidao.com',
+        'http://localhost:3000',
+        'http://localhost:8081',
+        'http://localhost:19000',
+      ];
 
   app.use(
     cors({
