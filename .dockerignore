@@ -1,0 +1,13 @@
+node_modules
+.env
+.env.*
+.git
+.gitignore
+logs
+*.log
+*.err
+dist
+build
+.next
+*.md
+.nixpacks

@@ -11,6 +11,9 @@ import errorHandler from './middleware/errorHandler.js';
 
 import v1Router from './api/v1/index.js';
 import logger from './utils/logger.js';
+import db from './db/postgres.js';
+import { getRedis } from './db/redis.js';
+import { getMongoDB } from './db/mongodb.js';
 
 export function createApp() {
   const app = express();
@@ -152,9 +155,17 @@ export function createApp() {
   app.use('/api/v1', v1Router);
 
   // ─── Health & root ────────────────────────────────────────────────────────────
-  app.get('/health', (_req, res) => {
-    // Actual health check logic lives in server.js; this is a fast ping target.
-    res.status(200).set('Cache-Control', 'no-store').json({ success: true });
+  app.get('/health', async (_req, res) => {
+    const [pg, mongo, redis] = await Promise.all([
+      db.ping().then(() => true).catch(() => false),
+      getMongoDB()?.command({ ping: 1 }).then(() => true).catch(() => false) ?? false,
+      Promise.resolve(getRedis()?.status === 'ready'),
+    ]);
+    const healthy = pg && mongo;
+    res
+      .status(healthy ? 200 : 503)
+      .set('Cache-Control', 'no-store')
+      .json({ success: healthy, services: { pg, mongo, redis }, uptime: Math.floor(process.uptime()) });
   });
 
   app.get('/', (_req, res) => {
