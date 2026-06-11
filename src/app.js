@@ -63,7 +63,11 @@ export function createApp() {
   });
 
   // ─── CORS ────────────────────────────────────────────────────────────────────
-  const ALLOWED_ORIGINS = process.env.ALLOWED_ORIGINS
+  // ALLOWED_ORIGINS env var accepts either:
+  //   "*"                  → allow every origin (dev / fully public APIs only)
+  //   "https://a.com,https://b.com" → explicit whitelist
+  // When the var is absent the hardcoded production list is used.
+  const _rawOrigins = process.env.ALLOWED_ORIGINS
     ? process.env.ALLOWED_ORIGINS.split(',').map((o) => o.trim())
     : [
         'https://sysfidao.com',
@@ -72,11 +76,15 @@ export function createApp() {
         'http://localhost:8081',
         'http://localhost:19000',
       ];
+  const ALLOW_ALL_ORIGINS  = _rawOrigins.includes('*');
+  const ALLOWED_ORIGINS    = ALLOW_ALL_ORIGINS ? [] : _rawOrigins;
 
   app.use(
     cors({
       origin: (origin, cb) => {
-        if (!origin || ALLOWED_ORIGINS.includes(origin)) return cb(null, true);
+        // Non-browser callers (mobile apps, curl) send no Origin — always allow.
+        if (!origin) return cb(null, true);
+        if (ALLOW_ALL_ORIGINS || ALLOWED_ORIGINS.includes(origin)) return cb(null, true);
         cb(new Error('Not allowed by CORS'));
       },
       methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
