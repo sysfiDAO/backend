@@ -429,6 +429,13 @@ function generateCode(len = 8) {
 
 // ─── DAO link ─────────────────────────────────────────────────────────────────
 
+export async function getAllLinkedDaoGuilds() {
+  const res = await db.query(
+    `SELECT * FROM guilds WHERE linked_dao_address IS NOT NULL ORDER BY name`,
+  );
+  return res.rows.map(normalizeGuild);
+}
+
 export async function linkDao(guildId, ownerUid, daoAddress, chainId) {
   const res = await db.query(
     `UPDATE guilds
@@ -452,7 +459,7 @@ export async function unlinkDao(guildId, ownerUid) {
 }
 
 export default {
-  createGuild, getGuildById, getGuildsByIds, updateGuild, deleteGuild,
+  createGuild, getGuildById, getGuildsByIds, getAllLinkedDaoGuilds, updateGuild, deleteGuild,
   getUserGuilds, getTopGuilds, searchGuilds,
   getMembership, joinGuild, leaveGuild, getMembers,
   getModerators, addModerator, removeModerator, updateModeratorPermissions,

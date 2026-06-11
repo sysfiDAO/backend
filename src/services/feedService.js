@@ -195,18 +195,14 @@ export async function pollActivityFeed(_userId, since) {
 }
 
 /**
- * Returns governance proposals for user's guild-linked DAOs,
- * ranked by vote activity + recency.
+ * Returns all guild-linked DAOs across the platform so the Governance tab
+ * shows every active DAO proposal, not just those from the user's guilds.
  */
-export async function getGovernanceFeed(userId, { page = 1, limit = 20 } = {}) {
+export async function getGovernanceFeed(_userId) {
   try {
-    const guilds = await guildDb.getUserGuilds(userId);
-    const linked = guilds.filter(g => g.linkedDaoAddress);
-    if (!linked.length) return { proposals: [], linkedDAOs: [] };
+    const linked = await guildDb.getAllLinkedDaoGuilds();
+    if (!linked.length) return { linkedDAOs: [] };
 
-    // Return the linked DAO references — the frontend already knows
-    // how to call /api/proposals/:chainId/:daoAddress via useDAOContract.
-    // We just surface which DAOs to aggregate.
     const linkedDAOs = linked.map(g => ({
       guildId:    g.id,
       guildName:  g.name,
