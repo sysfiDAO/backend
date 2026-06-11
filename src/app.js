@@ -63,30 +63,11 @@ export function createApp() {
   });
 
   // ─── CORS ────────────────────────────────────────────────────────────────────
-  // ALLOWED_ORIGINS env var accepts either:
-  //   "*"                  → allow every origin (dev / fully public APIs only)
-  //   "https://a.com,https://b.com" → explicit whitelist
-  // When the var is absent the hardcoded production list is used.
-  const _rawOrigins = process.env.ALLOWED_ORIGINS
-    ? process.env.ALLOWED_ORIGINS.split(',').map((o) => o.trim())
-    : [
-        'https://sysfidao.com',
-        'https://www.sysfidao.com',
-        'http://localhost:3000',
-        'http://localhost:8081',
-        'http://localhost:19000',
-      ];
-  const ALLOW_ALL_ORIGINS  = _rawOrigins.includes('*');
-  const ALLOWED_ORIGINS    = ALLOW_ALL_ORIGINS ? [] : _rawOrigins;
-
+  // Open to all origins. origin: true reflects the request Origin back so that
+  // credentials: true still works (browsers block credentials with origin: '*').
   app.use(
     cors({
-      origin: (origin, cb) => {
-        // Non-browser callers (mobile apps, curl) send no Origin — always allow.
-        if (!origin) return cb(null, true);
-        if (ALLOW_ALL_ORIGINS || ALLOWED_ORIGINS.includes(origin)) return cb(null, true);
-        cb(new Error('Not allowed by CORS'));
-      },
+      origin: true,
       methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
       allowedHeaders: ['Content-Type', 'Authorization', 'X-Request-ID', 'X-Chain-Id'],
       exposedHeaders: ['X-Request-ID', 'RateLimit-Limit', 'RateLimit-Remaining', 'RateLimit-Reset'],
