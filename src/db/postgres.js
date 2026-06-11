@@ -2,7 +2,6 @@ import pkg from 'pg';
 const { Pool } = pkg;
 import logger from '../utils/logger.js';
 
-const IS_PROD = process.env.NODE_ENV === 'production';
 
 const RETRYABLE = new Set([
   'Connection terminated unexpectedly',
@@ -47,7 +46,7 @@ class Database {
       keepAlive:                   true,
       keepAliveInitialDelayMillis: 10_000,
 
-      ...(IS_PROD && { ssl: { rejectUnauthorized: true } }),
+      ssl: false,
     });
 
     this.pool.on('connect', (client) => {

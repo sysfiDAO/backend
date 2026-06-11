@@ -3,8 +3,6 @@ import logger from '../utils/logger.js';
 
 const MONGODB_URI = process.env.MONGODB_URI || 'mongodb://localhost:27017';
 const DB_NAME     = process.env.MONGODB_DB_NAME || 'nexus_dao';
-const IS_PROD     = process.env.NODE_ENV === 'production';
-
 let client = null;
 let db     = null;
 
@@ -20,11 +18,8 @@ export async function connectMongoDB() {
     minPoolSize:              2,
     retryReads:  true,
     retryWrites: true,
-    compressors:  ['zlib'],  // wire compression for Atlas / remote hosts (zstd needs optional @mongodb-js/zstd)
-    ...(IS_PROD && !MONGODB_URI.includes('localhost') && {
-      tls: true,
-      // Do NOT set tlsAllowInvalidCertificates — rely on Node.js CA bundle for Atlas.
-    }),
+    compressors:  ['zlib'],
+    tls: false,
   });
 
   await client.connect();
