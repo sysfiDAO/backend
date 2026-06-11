@@ -27,6 +27,13 @@ export async function requireAuth(req, res, next) {
     next();
   } catch (err) {
     logger.warn(`[guildAuth] Token verification failed: ${err.message}`);
+
+    // Firebase Admin init failures (missing env vars, invalid key) are server
+    // misconfigurations, not bad tokens — return 500 so they're easy to spot.
+    if (err.message?.includes('FIREBASE_') || err.message?.includes('must be set')) {
+      return res.status(500).json({ success: false, error: 'Auth service misconfigured' });
+    }
+
     return res.status(401).json({ success: false, error: 'Invalid or expired token' });
   }
 }
