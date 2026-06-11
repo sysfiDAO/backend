@@ -89,35 +89,29 @@ export async function refreshPostScore(postId) {
 // ─── Feed aggregation ─────────────────────────────────────────────────────────
 
 /**
- * Returns ranked activity feed (guild posts) for a user.
- * Strategy: load posts from all user guilds, re-sort by visibility_score.
+ * Returns ranked activity feed (guild posts) from ALL public guilds.
+ * Posts are ranked by visibility score — engagement × diversity ÷ age.
  */
-export async function getActivityFeed(userId, { page = 1, limit = 20 } = {}) {
+export async function getActivityFeed(_userId, { page = 1, limit = 20 } = {}) {
   try {
-    const guilds = await guildDb.getUserGuilds(userId);
-    if (!guilds.length) return [];
-
-    const guildIds = guilds.map(g => g.id);
     const posts    = getMongoDB().collection('guild_posts');
-
-    // Build a guild lookup for enrichment
-    const guildMap = Object.fromEntries(guilds.map(g => [g.id, g]));
-
-    // Pull enough posts to rank across guilds; multiply limit so top guilds
-    // don't monopolise the page after sorting
     const rawLimit = limit * 5;
     const offset   = (page - 1) * limit;
 
     const docs = await posts
-      .find({ guildId: { $in: guildIds }, isDeleted: false })
+      .find({ isDeleted: false })
       .sort({ visibilityScore: -1, timestamp: -1 })
       .skip(offset)
       .limit(rawLimit)
       .toArray();
 
-    // Attach guild metadata and compute live score (score in DB may be stale)
+    // Batch-fetch guild metadata for all unique guildIds in this result set
+    const uniqueGuildIds = [...new Set(docs.map(d => d.guildId).filter(Boolean))];
+    const guilds = await guildDb.getGuildsByIds(uniqueGuildIds);
+    const guildMap = Object.fromEntries(guilds.map(g => [g.id, g]));
+
     const enriched = docs.map(doc => {
-      const guild = guildMap[doc.guildId] || {};
+      const guild     = guildMap[doc.guildId] || {};
       const liveScore = computeVisibilityScore(doc);
       return {
         id:             doc._id.toString(),
@@ -143,7 +137,6 @@ export async function getActivityFeed(userId, { page = 1, limit = 20 } = {}) {
       };
     });
 
-    // Sort by live score and return the page slice
     enriched.sort((a, b) => b.visibilityScore - a.visibilityScore);
     return enriched.slice(0, limit);
   } catch (err) {
@@ -153,22 +146,23 @@ export async function getActivityFeed(userId, { page = 1, limit = 20 } = {}) {
 }
 
 /**
- * Poll for new posts since a timestamp (for real-time feed updates).
+ * Poll for new posts from ALL guilds since a timestamp (for real-time updates).
  */
-export async function pollActivityFeed(userId, since) {
+export async function pollActivityFeed(_userId, since) {
   try {
-    const guilds = await guildDb.getUserGuilds(userId);
-    if (!guilds.length) return [];
-
-    const guildIds = guilds.map(g => g.id);
-    const posts    = getMongoDB().collection('guild_posts');
-    const guildMap = Object.fromEntries(guilds.map(g => [g.id, g]));
+    const posts = getMongoDB().collection('guild_posts');
 
     const docs = await posts
-      .find({ guildId: { $in: guildIds }, isDeleted: false, timestamp: { $gt: Number(since) } })
+      .find({ isDeleted: false, timestamp: { $gt: Number(since) } })
       .sort({ timestamp: 1 })
       .limit(50)
       .toArray();
+
+    if (!docs.length) return [];
+
+    const uniqueGuildIds = [...new Set(docs.map(d => d.guildId).filter(Boolean))];
+    const guilds  = await guildDb.getGuildsByIds(uniqueGuildIds);
+    const guildMap = Object.fromEntries(guilds.map(g => [g.id, g]));
 
     return docs.map(doc => {
       const guild = guildMap[doc.guildId] || {};

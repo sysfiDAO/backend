@@ -52,6 +52,12 @@ export async function getGuildById(guildId) {
   return res.rows[0] ? normalizeGuild(res.rows[0]) : null;
 }
 
+export async function getGuildsByIds(guildIds) {
+  if (!guildIds?.length) return [];
+  const res = await db.query(`SELECT * FROM guilds WHERE id = ANY($1)`, [guildIds]);
+  return res.rows.map(normalizeGuild);
+}
+
 export async function updateGuild(guildId, ownerUid, updates) {
   const allowed = ['name', 'description', 'genre', 'logo_url', 'banner_url'];
   const fields = [];
@@ -446,7 +452,7 @@ export async function unlinkDao(guildId, ownerUid) {
 }
 
 export default {
-  createGuild, getGuildById, updateGuild, deleteGuild,
+  createGuild, getGuildById, getGuildsByIds, updateGuild, deleteGuild,
   getUserGuilds, getTopGuilds, searchGuilds,
   getMembership, joinGuild, leaveGuild, getMembers,
   getModerators, addModerator, removeModerator, updateModeratorPermissions,
